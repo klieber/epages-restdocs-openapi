@@ -255,22 +255,37 @@ object OpenApi20Generator {
         oauth2SecuritySchemeDefinition: Oauth2Configuration?
     ): Operation {
         val firstModelForPathAndMethod = modelsWithSamePathAndMethod.first()
+
         return Operation().apply {
-            summary = firstModelForPathAndMethod.summary
-            description = firstModelForPathAndMethod.description
-            operationId = firstModelForPathAndMethod.operationId
+            summary = modelsWithSamePathAndMethod.find { it.summary != null }?.summary
+            description = modelsWithSamePathAndMethod.find { it.description != null }?.description
+            operationId = modelsWithSamePathAndMethod.find { it.operationId != null }?.operationId
             tags = modelsWithSamePathAndMethod.flatMap { it.tags }.distinct().nullIfEmpty()
             consumes = modelsWithSamePathAndMethod.map { it.request.contentType }.distinct().filterNotNull().nullIfEmpty()
             produces = modelsWithSamePathAndMethod.map { it.response.contentType }.distinct().filterNotNull().nullIfEmpty()
+
+            val requiredParameters = modelsWithSamePathAndMethod.flatMap { it.request.requestParameters }
+                    .asSequence()
+                    .filter { it.optional.not() }
+                    .groupBy { it.name }
+                    .filterValues { modelsWithSamePathAndMethod.size == it.size }
+                    .keys
+
             parameters =
                     extractPathParameters(
                         firstModelForPathAndMethod
                     ).plus(
-                        firstModelForPathAndMethod.request.requestParameters.map {
-                            requestParameterDescriptor2Parameter(
-                                it
-                            )
-                    }).plus(
+                        modelsWithSamePathAndMethod.flatMap { it.request.requestParameters }
+                            .asSequence()
+                            .distinctBy { it.name }
+                            .map {
+                                requestParameterDescriptor2Parameter(
+                                        it,
+                                        requiredParameters.contains(it.name)
+                                )
+                            }
+                            .toList()
+                    ).plus(
                         firstModelForPathAndMethod.request.headers.map {
                             header2Parameter(it)
                         }
@@ -398,11 +413,11 @@ object OpenApi20Generator {
         }
     }
 
-    private fun requestParameterDescriptor2Parameter(parameterDescriptor: ParameterDescriptor): QueryParameter {
+    private fun requestParameterDescriptor2Parameter(parameterDescriptor: ParameterDescriptor, requiredByAll: Boolean): QueryParameter {
         return QueryParameter().apply {
             name = parameterDescriptor.name
             description = parameterDescriptor.description
-            required = parameterDescriptor.optional.not()
+            required = requiredByAll
             type = parameterDescriptor.type.toLowerCase()
         }
     }
